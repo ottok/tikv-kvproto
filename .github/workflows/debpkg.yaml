@@ -2,31 +2,99 @@ name: build-deb
 on: [pull_request, workflow_dispatch, push]
 
 jobs:
-  build-deb:
-    name: Build Debian Package
+  build-deb-debian-unstable:
+    name: Build deb in debian:unstable
     runs-on: ubuntu-latest
+    container:
+      image: debian:sid
     steps:
+      - name: Install git
+        run: |
+          apt-get install --update --yes --quiet --no-install-recommends git ca-certificates
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          path: builddir
-      - name: Install build tools
+      - name: Install build dependencies
         run: |
-          sudo apt update && sudo apt install -y \
-          build-essential \
-          dh-sequence-golang \
-          dpkg-dev \
-          golang-any \
-          golang-github-golang-protobuf-1-5-dev \
-          golang-github-grpc-ecosystem-grpc-gateway-dev \
-          golang-gogoprotobuf-dev golang-google-genproto-dev \
-          golang-google-grpc-dev protobuf-compiler
-      - name: Run build
+          apt-get build-dep --yes --quiet .
+      - name: Write changelog
         run: |
-          cd builddir
-          dpkg-buildpackage -b
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          PACKAGE="$(grep --only-matching --perl-regex "Source: \K.*" debian/control)"
+          VERSION="$(dpkg-parsechangelog -S Version)"
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          RELEASE="${VERSION}+${COMMIT_ID}"
+          MSG="$(git log -1 --format='%h %s')"
+          FULLNAME=$(git show -s --format="%cn")
+          EMAIL=$(git show -s --format="%ce")
+          DATE=$(date -R)
+          cat > debian/changelog <<EOF
+          ${PACKAGE} (${RELEASE}) UNRELEASED; urgency=medium
+
+          * Latest commit:
+          ${MSG}
+
+          -- ${FULLNAME} <${EMAIL}>  ${DATE}
+          EOF
+      - name: Build deb
+        run: |
+          dpkg-buildpackage --build=binary
+      - name: Debug
+        run: |
+          ls -la
+          ls -la ..
+          env | sort
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kvproto-deb-artifacts.zip
+          name: $GITHUB_JOB
           path: golang-github-pingcap-kvproto*
+
+  build-deb-ubuntu-latest:
+    name: Build deb in ubuntu:devel
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:devel
+    steps:
+      - name: Install git
+        run: |
+          apt-get install --update --yes --quiet --no-install-recommends git ca-certificates
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          apt-get build-dep --yes --quiet .
+      - name: Write changelog
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          PACKAGE="$(grep --only-matching --perl-regex "Source: \K.*" debian/control)"
+          VERSION="$(dpkg-parsechangelog -S Version)"
+          COMMIT_ID=$(git rev-parse --short HEAD)
+          RELEASE="${VERSION}+${COMMIT_ID}"
+          MSG="$(git log -1 --format='%h %s')"
+          FULLNAME=$(git show -s --format="%cn")
+          EMAIL=$(git show -s --format="%ce")
+          DATE=$(date -R)
+          cat > debian/changelog <<EOF
+          ${PACKAGE} (${RELEASE}) UNRELEASED; urgency=medium
+
+          * Latest commit:
+          ${MSG}
+
+          -- ${FULLNAME} <${EMAIL}>  ${DATE}
+          EOF
+      - name: Build deb
+        run: |
+          dpkg-buildpackage --build=binary
+      - name: Debug
+        run: |
+          ls -la
+          ls -la ..
+          env | sort
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: $GITHUB_JOB
+          path: golang-github-pingcap-kvproto*
+      - name: Debug RUNNER_TOOL_CACHE for $GITHUB_JOB
+        run: |
+          find $RUNNER_TOOL_CACHE -ls
